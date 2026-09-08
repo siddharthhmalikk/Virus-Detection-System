@@ -91,45 +91,47 @@ def heuristic_check(file_path: str) -> str | None:
 
 def scan_directory(folder_path: str, progress_callback=None) -> list[dict]:
     results = []
-    all_files = []
+    total = 0
+
+    # First count files so progress can be shown without storing every path in memory.
+    for _, _, files in os.walk(folder_path):
+        total += len(files)
+
+    done = 0
     for root, _, files in os.walk(folder_path):
         for name in files:
-            all_files.append(os.path.join(root, name))
+            file_path = os.path.join(root, name)
+            file_hash = get_file_hash(file_path)
+            status = "SAFE"
+            detail = "-"
 
-    total = len(all_files)
-
-    for index, file_path in enumerate(all_files):
-        file_hash = get_file_hash(file_path)
-        status = "SAFE"
-        detail = "-"
-
-        if file_hash is None:
-            status = "ACCESS DENIED"
-            detail = "Cannot read file"
-        else:
-            virus_name = check_signature(file_hash)
-            if virus_name:
-                status = "INFECTED"
-                detail = virus_name
+            if file_hash is None:
+                status = "ACCESS DENIED"
+                detail = "Cannot read file"
             else:
-                reason = heuristic_check(file_path)
-                if reason:
-                    status = "SUSPICIOUS"
-                    detail = reason
+                virus_name = check_signature(file_hash)
+                if virus_name:
+                    status = "INFECTED"
+                    detail = virus_name
+                else:
+                    reason = heuristic_check(file_path)
+                    if reason:
+                        status = "SUSPICIOUS"
+                        detail = reason
 
-        results.append({
-            "file": file_path,
-            "hash": file_hash or "N/A",
-            "status": status,
-            "detail": detail,
-            "deleted": False,          # ← NEW: track deletion state
-        })
+            results.append({
+                "file": file_path,
+                "hash": file_hash or "N/A",
+                "status": status,
+                "detail": detail,
+                "deleted": False,
+            })
 
-        if progress_callback:
-            progress_callback(index + 1, total)
+            done += 1
+            if progress_callback:
+                progress_callback(done, total)
 
     return results
-
 
 # ─────────────────────────────────────────────
 #  MODULE 5 — REPORT GENERATOR
@@ -548,7 +550,12 @@ class VirusDetectionApp:
             "ACCESS DENIED":"⚫",
         }
 
-        for idx, r in enumerate(results):
+        # Render only a preview to keep Tkinter responsive on large scans.
+        # The full result set remains available for CSV export.
+        max_visible_results = 300
+        visible_results = results[:max_visible_results]
+
+        for idx, r in enumerate(visible_results):
             status = r["status"]
             color  = COLOR_MAP.get(status, self.TEXT)
             icon   = ICON_MAP.get(status, "⚫")
@@ -557,7 +564,6 @@ class VirusDetectionApp:
             row = tk.Frame(self._results_frame, bg=self.BG)
             row.pack(fill="x", padx=4, pady=1)
 
-            # ── NEW: Checkbox (only for threats) ──
             var = tk.BooleanVar(value=False)
             self._check_vars[idx] = var
 
@@ -573,13 +579,11 @@ class VirusDetectionApp:
             )
             cb.pack(side="left", padx=(2, 0))
 
-            # Status icon + label
             tk.Label(row, text=f"{icon} [{status:<13}]",
                      font=("Courier New", 9, "bold"),
                      bg=self.BG, fg=color,
                      width=22, anchor="w").pack(side="left", padx=(4, 6))
 
-            # File path (truncated with tooltip via wraplength)
             short = r["file"]
             if len(short) > 52:
                 short = "…" + short[-52:]
@@ -590,7 +594,6 @@ class VirusDetectionApp:
                                 anchor="w")
             file_lbl.pack(side="left", fill="x", expand=True)
 
-            # Detail badge for threats
             if is_threat:
                 tk.Label(row, text=r["detail"],
                          font=("Courier New", 8),
@@ -598,9 +601,19 @@ class VirusDetectionApp:
                          fg=color,
                          padx=6, pady=2).pack(side="right", padx=8)
 
-            # Store references for later strikethrough effect
-            r["_row"]      = row
+            r["_row"] = row
             r["_file_lbl"] = file_lbl
+
+        if len(results) > max_visible_results:
+            tk.Label(
+                self._results_frame,
+                text=f"Showing first {max_visible_results} of {len(results)} results. Export the CSV report for the full scan.",
+                font=("Courier New", 8),
+                bg=self.BG,
+                fg=self.MUTED,
+                wraplength=620,
+                justify="left"
+            ).pack(fill="x", padx=8, pady=8)
 
         # ── Summary row ──
         sep = tk.Frame(self._results_frame, bg=self.BORDER, height=1)
@@ -634,7 +647,10 @@ class VirusDetectionApp:
         select = self._select_all_var.get()
         for idx, r in enumerate(self.scan_results):
             if r["status"] in ("INFECTED", "SUSPICIOUS") and not r.get("deleted"):
-                self._check_vars[idx].set(select)
+                if idx not in self._check_vars:
+                    self._check_vars[idx] = tk.BooleanVar(value=select)
+                else:
+                    self._check_vars[idx].set(select)
 
     def _on_checkbox_change(self):
         # Keep "select all" in sync
