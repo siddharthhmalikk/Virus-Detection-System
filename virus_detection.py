@@ -550,12 +550,7 @@ class VirusDetectionApp:
             "ACCESS DENIED":"⚫",
         }
 
-        # Render only a preview to keep Tkinter responsive on large scans.
-        # The full result set remains available for CSV export.
-        max_visible_results = 300
-        visible_results = results[:max_visible_results]
-
-        for idx, r in enumerate(visible_results):
+        for idx, r in enumerate(results):
             status = r["status"]
             color  = COLOR_MAP.get(status, self.TEXT)
             icon   = ICON_MAP.get(status, "⚫")
@@ -603,17 +598,6 @@ class VirusDetectionApp:
 
             r["_row"] = row
             r["_file_lbl"] = file_lbl
-
-        if len(results) > max_visible_results:
-            tk.Label(
-                self._results_frame,
-                text=f"Showing first {max_visible_results} of {len(results)} results. Export the CSV report for the full scan.",
-                font=("Courier New", 8),
-                bg=self.BG,
-                fg=self.MUTED,
-                wraplength=620,
-                justify="left"
-            ).pack(fill="x", padx=8, pady=8)
 
         # ── Summary row ──
         sep = tk.Frame(self._results_frame, bg=self.BORDER, height=1)
