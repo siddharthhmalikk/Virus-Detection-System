@@ -16,6 +16,8 @@
 import os
 import hashlib
 import csv
+import threading
+import queue
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from datetime import datetime
@@ -185,6 +187,8 @@ class VirusDetectionApp:
         self.root.configure(bg=self.BG)
 
         self.scan_results: list[dict] = []
+        self._scan_events = queue.Queue()
+        self._scan_running = False
         # ── NEW: per-result checkbox variables (keyed by index) ──
         self._check_vars: dict[int, tk.BooleanVar] = {}
 
@@ -480,14 +484,48 @@ class VirusDetectionApp:
         self._check_vars.clear()
         self._clear_results_frame()
 
-        self.scan_results = scan_directory(folder, self._update_progress)
-        self._display_results()
+        self._scan_running = True
+        threading.Thread(
+            target=self._scan_worker,
+            args=(folder,),
+            daemon=True
+        ).start()
+        self.root.after(100, self._process_scan_events)
 
-    def _update_progress(self, done: int, total: int):
-        pct = (done / total * 100) if total else 0
-        self.progress_var.set(pct)
-        self.progress_label.config(text=f"{done} / {total} files")
-        self.root.update_idletasks()
+    def _scan_worker(self, folder):
+        def progress(done: int, total: int):
+            self._scan_events.put(("progress", done, total))
+
+        try:
+            results = scan_directory(folder, progress)
+            self._scan_events.put(("complete", results))
+        except Exception as exc:
+            self._scan_events.put(("error", str(exc)))
+
+    def _process_scan_events(self):
+        try:
+            while True:
+                event = self._scan_events.get_nowait()
+                if event[0] == "progress":
+                    _, done, total = event
+                    pct = (done / total * 100) if total else 0
+                    self.progress_var.set(pct)
+                    self.progress_label.config(text=f"{done} / {total} files")
+                elif event[0] == "complete":
+                    self.scan_results = event[1]
+                    self._scan_running = False
+                    self._display_results()
+                    return
+                elif event[0] == "error":
+                    self._scan_running = False
+                    self.scan_btn.config(state="normal")
+                    messagebox.showerror("Scan Error", event[1])
+                    return
+        except queue.Empty:
+            pass
+
+        if self._scan_running:
+            self.root.after(100, self._process_scan_events)
 
     def _display_results(self):
         results = self.scan_results
