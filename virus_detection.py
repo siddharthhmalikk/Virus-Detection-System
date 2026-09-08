@@ -93,9 +93,12 @@ def scan_directory(folder_path: str, progress_callback=None) -> list[dict]:
     results = []
     total = 0
 
-    # First count files so progress can be shown without storing every path in memory.
+    # Count files before scanning so the progress total is available immediately.
     for _, _, files in os.walk(folder_path):
         total += len(files)
+
+    if progress_callback:
+        progress_callback(0, total)
 
     done = 0
     for root, _, files in os.walk(folder_path):
